@@ -21,6 +21,7 @@ Activity & event types:
 
 # Standard library imports
 import argparse
+import croniter
 import csv
 import http.cookiejar
 import io
@@ -31,6 +32,7 @@ import os.path
 import re
 import string
 import sys
+import time
 import unicodedata
 import urllib.request
 import zipfile
@@ -478,6 +480,8 @@ def parse_arguments(argv):
         help='comma-separated list of activity type IDs to allow. Format example: 3,9')
     parser.add_argument('-ss', '--session', metavar='DIRECTORY',
         help='enable loading and storing SSO information from/to given directory')
+    parser.add_argument('--daemon', metavar='CRON', default=None,
+        help='run as daemon, using CRON schedule')
     # fmt: on
 
     return parser.parse_args(argv[1:])
@@ -1225,25 +1229,7 @@ def process_activity_item(item, number_of_items, device_dict, type_filter, activ
         csv_write_record(csv_filter, extract, actvty, details, activity_type_name, event_type_name)
 
 
-def main(argv):
-    """
-    Main entry point for gcexport.py
-    """
-    args = parse_arguments(argv)
-    setup_logging(args)
-    logging.info("Starting %s version %s, using Python version %s", argv[0], SCRIPT_VERSION, python_version())
-    logging_verbosity(args.verbosity)
-
-    print('Welcome to Garmin Connect Exporter!')
-
-    if sys.version_info < MINIMUM_PYTHON_VERSION:
-        logging.warning(
-            "Python version %s is older than %s.%s.x, results might be unexpected",
-            python_version(),
-            MINIMUM_PYTHON_VERSION[0],
-            MINIMUM_PYTHON_VERSION[1],
-        )
-
+def run_gcexport(args):
     # Get filter list with IDs to exclude
     if args.exclude is not None:
         exclude_list = read_exclude(args.exclude)
@@ -1312,6 +1298,42 @@ def main(argv):
         call([args.external, "--" + args.args, csv_filename])
 
     print('Done!')
+
+
+
+def main(argv):
+    """
+    Main entry point for gcexport.py
+    """
+    args = parse_arguments(argv)
+    setup_logging(args)
+    logging.info("Starting %s version %s, using Python version %s", argv[0], SCRIPT_VERSION, python_version())
+    logging_verbosity(args.verbosity)
+
+    print('Welcome to Garmin Connect Exporter!')
+
+    if sys.version_info < MINIMUM_PYTHON_VERSION:
+        logging.warning(
+            "Python version %s is older than %s.%s.x, results might be unexpected",
+            python_version(),
+            MINIMUM_PYTHON_VERSION[0],
+            MINIMUM_PYTHON_VERSION[1],
+        )
+
+    if args.daemon:
+        cron = croniter.croniter(args.daemon, datetime.now())
+        next_run = cron.get_next(datetime)
+        print(f"Next run: {next_run}")
+        while True:
+            if datetime.now() >= next_run:
+                run_gcexport(args)
+                next_run = cron.get_next(datetime)
+                print(f"Next run: {next_run}")
+            else:
+                print(f"Sleeping until {next_run}")
+                time.sleep(next_run.timestamp() - datetime.now().timestamp())
+    else:
+        run_gcexport(args)
 
 
 if __name__ == "__main__":
